@@ -1,49 +1,52 @@
 # CLAUDE.md
 
-Pong distribuído (trabalho de Processamento Paralelo): as raquetes são controladas pela
-inclinação de ESP32s com acelerômetro, o servidor é a autoridade do jogo e o navegador só desenha.
+Pong em que as raquetes são controladas pela inclinação de ESP32s com acelerômetro.
 Textos, comentários e mensagens de UI em português (pt-BR).
 
 ## Comandos
 
 - `bun install` — dependências
-- `bun run dev` — servidor com hot reload (`bun --hot server/main.ts`)
-- `bun run start` — servidor sem hot reload (`PORT=...` muda a porta)
-- `bunx tsc --noEmit -p .` — checagem de tipos
-- `bun build ./web/index.html --outdir <tmp>` — checa se o frontend compila (não há testes)
-- Firmware: `cd esp32 && pio run -t upload` (PlatformIO)
+- `bun run dev` — servidor com hot reload (`bun --hot main.ts`)
+- `bun run start` — servidor sem hot reload
+- `bun build ./page.html --outdir <tmp>` — checa se o frontend compila (não há testes)
 
 ## Arquitetura
 
-Fluxo: `ESP32 --ws /ws/playerN--> server --ws /viewer (pub/sub, 60 Hz)--> navegador`
+Fluxo: `ESP32 --ws /--> main.ts --ws /viewer (pub/sub)--> navegador (React)`
 
-- `esp32/src/main.cpp` — firmware (mesmo para as duas placas; `PLAYER` = 1 ou 2).
-  - `TaskSensor` (núcleo 1): MMA8452 a 100 Hz, EMA + calibração de repouso + zona morta → `pos` -1..1.
-  - `TaskNetwork` (núcleo 0): Wi-Fi, WebSocket, envio a 50 Hz, ping/stats a 1 s, reconexão.
-  - Comunicação: fila de 1 posição (`xQueueOverwrite`) — o produtor nunca bloqueia.
-    Contadores em `std::atomic`, Serial com mutex (`logLine`), recalibração por notificação de tarefa.
-  - A aquisição não pode depender da rede: nada na TaskSensor pode esperar a TaskNetwork.
-  - `WIFI_SSID`/`WIFI_PASS` ficam como placeholder — preencha só localmente, nunca versione credenciais.
-- `server/main.ts` — `Bun.serve` na porta **6767**: conexões, laço de 60 Hz, timeouts, estatísticas.
-  - `/ws/player1`, `/ws/player2` — ESP32. A conexão só assume a raquete após `hello` válido
-    (com `player` igual ao do endpoint); um novo `hello` substitui a conexão anterior.
-  - `/viewer` — navegadores (tópico `viewers`); recebem `welcome` + `state` + `stats` ao conectar.
-  - `/game` — `web/index.html` como HTML import (Bun empacota JSX + CSS sozinho). `/` redireciona.
-- `server/game.ts` — classe `Game`: estado autoritativo e física. Só `step()` altera posições,
-  bola e placar; handlers de rede apenas gravam entradas (alvo, tecla) e comandos de fase.
-  Após um ponto só raquetes de teclado voltam ao centro — não resetar as do ESP32.
-- `server/protocol.ts` — tipos e validação (`parseDevice`, `parseViewer`); valide todo tipo novo aqui.
-- `web/`
-  - `useGame.js` — conecta em `/viewer` (reconecta a cada 2 s), guarda o último `state` num ref
-    e só re-renderiza React quando fase/placar/controle mudam. `useKeyboard` envia teclas ao servidor.
-  - `useRenderer.js` — desenha o estado no canvas a cada `requestAnimationFrame`. Sem física.
-  - `App.jsx` — placar, overlays por fase, painéis de diagnóstico por jogador.
-- `documentation/relatorio.md` — relatório técnico (valores marcados **[medir]** vêm dos experimentos).
+- `controlador.cpp` — firmware Arduino do ESP32 + MMA8452 (I²C, ±2g, envia a cada 50 ms).
+  `WS_HOST`/`WS_PORT` precisam apontar para o PC e para a porta do `main.ts`.
+  `WIFI_SSID`/`WIFI_PASS` ficam como placeholder no código — preencha só localmente
+  antes de gravar e nunca versione credenciais reais.
+- `main.ts` — servidor `Bun.serve` na porta **6767**:
+  - `/` — upgrade WebSocket do ESP32 (`role: "device"`); navegador comum é redirecionado para `/game`.
+  - `/viewer` — WebSocket das páginas (`role: "viewer"`), inscritas no tópico `viewers`.
+  - `/game` — `page.html` como HTML import; o Bun empacota `frontend/` (JSX + CSS) sozinho, sem Vite.
+- `page.html` — só o shell (`#root` + `frontend/main.jsx`).
+- `frontend/`
+  - `useDevices.js` — conecta em `/viewer` (reconecta a cada 2 s), guarda a última amostra
+    por dispositivo e distribui slots: 1º ESP32 = `left` (J1), 2º = `right` (J2).
+    `getTilt(side)` devolve -1..1 ou `null` se o lado não tem placa.
+    Calibração: `AXIS` (eixo usado, hoje `y`) e `FULL_TILT` (g para ir de ponta a ponta).
+  - `usePong.js` — loop do jogo em canvas (`requestAnimationFrame`). Raquete com ESP32 segue
+    a inclinação (suavizada por `TILT_SMOOTHING`); sem ESP32 usa teclado (W/S, ↑/↓).
+    Após um ponto só raquetes de teclado voltam ao centro — não resetar as do ESP32.
+  - `App.jsx` — placar, overlays (início/vitória), status da conexão e quem controla cada lado.
 
-O protocolo completo está no `README.md` — mantenha-o atualizado ao mudar mensagens.
+## Protocolo
+
+ESP32 → servidor (JSON texto):
+- `{"type":"hello","device":"esp32-01","scale":2}`
+- `{"type":"accel","device":"esp32-01","t":<ms>,"x":<g>,"y":<g>,"z":<g>}`
+
+Servidor → viewers:
+- `{"type":"snapshot","users":{<id>:{x,y,z,t,receivedAt}}}` ao conectar
+- `{"type":"pos","device":<id>,x,y,z,t,receivedAt}` a cada amostra
+- `{"type":"leave","device":<id>}` quando o ESP32 desconecta
+
+`main.ts` valida as mensagens em `parse()` antes de usar; mantenha isso ao adicionar tipos.
 
 ## Convenções
 
 - Frontend em JSX puro (sem TypeScript); servidor em TypeScript estrito.
-- O navegador nunca é autoridade: nada de física ou placar no frontend.
 - Não use `innerHTML` com dados do dispositivo — `device` vem da rede.
