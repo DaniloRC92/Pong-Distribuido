@@ -2,8 +2,8 @@
   "name": "paralela",
   "private": true,
   "scripts": {
-    "dev": "bun --hot main.ts",
-    "start": "bun main.ts"
+    "dev": "bun --hot server/main.ts",
+    "start": "bun server/main.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
