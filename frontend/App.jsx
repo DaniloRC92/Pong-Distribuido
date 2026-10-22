@@ -1,9 +1,7 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef } from 'react';
 import { usePong } from './usePong';
-import { useDevices } from './useDevices';
+import { useGame, useKeyboard } from './useGame';
 import './App.css';
-
-const WIN_SCORE = 7;
 
 const STATUS_TEXT = {
   connecting: 'Conectando ao servidor…',
@@ -11,53 +9,21 @@ const STATUS_TEXT = {
   bad: 'Sem conexão com o servidor. Tentando de novo…',
 };
 
+const PLAYER_NAME = { left: 'Jogador 1', right: 'Jogador 2' };
+
 function controlLabel(deviceId, keys) {
   return deviceId ? `ESP32 ${deviceId}` : keys;
 }
 
 export default function App() {
   const canvasRef = useRef(null);
-  const [score, setScore] = useState({ left: 0, right: 0 });
-  const [phase, setPhase] = useState('idle'); // idle | playing | won
-  const { slots, status, getTilt } = useDevices();
+  const { stateRef, arena, winScore, view, status, send } = useGame();
+  usePong(canvasRef, stateRef, arena);
+  useKeyboard(send);
 
-  const handleScore = useCallback((s) => {
-    setScore({ ...s });
-    if (s.left >= WIN_SCORE || s.right >= WIN_SCORE) {
-      setPhase('won');
-    }
-  }, []);
-
-  const { getState, start, restart, WIDTH, HEIGHT } = usePong(canvasRef, handleScore, getTilt);
-
-  const handleStart = () => {
-    start();
-    setPhase('playing');
-  };
-
-  const handleRestart = () => {
-    setScore({ left: 0, right: 0 });
-    restart();
-    setPhase('playing');
-  };
-
-  const winnerLabel = () => {
-    const s = getState();
-    if (!s) return '';
-    return s.winner === 'left' ? 'Jogador 1' : 'Jogador 2';
-  };
-
-  // Prevent arrow keys from scrolling the page during play
-  useEffect(() => {
-    const prevent = (e) => {
-      if (['ArrowUp', 'ArrowDown', 'Space'].includes(e.code)) e.preventDefault();
-    };
-    window.addEventListener('keydown', prevent, { passive: false });
-    return () => window.removeEventListener('keydown', prevent);
-  }, []);
-
-  const leftControl = controlLabel(slots.left, 'W / S');
-  const rightControl = controlLabel(slots.right, '↑ / ↓');
+  const score = view?.score ?? { left: 0, right: 0 };
+  const leftControl = controlLabel(view?.devices.left, 'W / S');
+  const rightControl = controlLabel(view?.devices.right, '↑ / ↓');
 
   return (
     <div className="app">
@@ -68,29 +34,25 @@ export default function App() {
         <span>{score.right}</span>
       </div>
       <div className="canvas-wrapper">
-        <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} />
+        <canvas ref={canvasRef} width={arena.width} height={arena.height} />
 
-        {phase === 'idle' && (
+        {status !== 'ok' ? (
           <div className="overlay">
-            <h2>Pong</h2>
-            <p>Primeiro a {WIN_SCORE} pontos vence</p>
-            <button onClick={handleStart}>Iniciar</button>
-            <p className="controls-hint">
-              J1: {leftControl} &nbsp;|&nbsp; J2: {rightControl}
-            </p>
+            <h2>Sem servidor</h2>
+            <p>A partida continua no servidor; a tela volta quando reconectar.</p>
           </div>
-        )}
-
-        {phase === 'won' && (
+        ) : view?.winner ? (
           <div className="overlay">
-            <h2>{winnerLabel()} venceu!</h2>
+            <h2>{PLAYER_NAME[view.winner]} venceu!</h2>
             <p>{score.left} — {score.right}</p>
-            <button onClick={handleRestart}>Jogar novamente</button>
+            <p>Nova partida em instantes…</p>
           </div>
-        )}
+        ) : null}
       </div>
       <p className="controls-hint">
         Jogador 1: {leftControl} &nbsp;·&nbsp; Jogador 2: {rightControl}
+        <br />
+        Primeiro a {winScore} pontos vence
       </p>
     </div>
   );

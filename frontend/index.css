@@ -4,13 +4,27 @@
   padding: 0;
 }
 
+/* Tema claro */
+:root {
+  color-scheme: light;
+  --bg: #f4f4f1;
+  --text: #1a1a1a;
+  --muted: #6b6b6b;
+  --border: #c8c8c8;
+  --ok: #2e7d32;
+  --bad: #c62828;
+}
+
 html, body, #root {
-  height: 100%;
+  min-height: 100%;
 }
 
 body {
-  background: #0a0a0a;
+  background: var(--bg);
+  font-family: 'Courier New', monospace;
+}
+
+#root {
   display: flex;
-  align-items: center;
   justify-content: center;
 }
